@@ -1,80 +1,60 @@
-import datetime
-from zoneinfo import ZoneInfo  # Python 3.9以降
-
-import icalendar
 import requests
+import datetime
+from icalendar import Calendar
+import pytz
+import os
+import json
 
-# Discord Webhook URL（書き換えてください）
-DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/xxxxxxxxxxx"
+ICS_URL = os.environ['ICS_URL']
+DISCORD_WEBHOOK = os.environ['DISCORD_WEBHOOK']
+CACHE_FILE = 'notified.json'
 
-# カレンダーURL
-ICS_URL = "https://lms.s.isct.ac.jp/2025/calendar/xxxxxxxxxx"
+JST = pytz.timezone('Asia/Tokyo')
+now = datetime.datetime.now(JST)
+later = now + datetime.timedelta(hours=24)
 
-# 日本時間に設定
-JST = ZoneInfo("Asia/Tokyo")
-
-
-def send_discord_notify(message):
-    data = {"content": message}
-    requests.post(DISCORD_WEBHOOK_URL, json=data)
-
-
-def get_upcoming_events():
+def fetch_events():
     res = requests.get(ICS_URL)
-    cal = icalendar.Calendar.from_ical(res.content)
-
-    upcoming = []
-    now = datetime.datetime.now(tz=JST)  # 現在時刻をJSTで取得
+    cal = Calendar.from_ical(res.content)
+    events = []
 
     for component in cal.walk():
         if component.name == "VEVENT":
-            summary = str(component.get("summary"))
-            dtstart = component.get("dtstart").dt
+            summary = str(component.get('summary'))
+            dtstart = component.get('dtstart').dt
+            if not isinstance(dtstart, datetime.datetime):
+                continue
+            dtstart = dtstart.astimezone(JST)
+            if now <= dtstart <= later:
+                events.append((summary, dtstart))
 
-            # 時刻をdatetimeに変換してJSTに
-            if isinstance(dtstart, datetime.date) and not isinstance(
-                dtstart, datetime.datetime
-            ):
-                dtstart = datetime.datetime.combine(dtstart, datetime.time(0, 0))
-            if isinstance(dtstart, datetime.datetime):
-                if dtstart.tzinfo is None:
-                    dtstart = dtstart.replace(tzinfo=datetime.timezone.utc)
-                dtstart = dtstart.astimezone(JST)
+    return events
 
-            delta_minutes = int((dtstart - now).total_seconds() / 60)
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            return set(json.load(f))
+    return set()
 
-            upcoming.append((summary, dtstart, delta_minutes))
+def save_cache(cache):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(list(cache), f)
 
-    return upcoming
+def notify(summary, dt):
+    message = f"⚠️【締切24時間以内】「{summary}」は {dt.strftime('%Y-%m-%d %H:%M')} に締切です！"
+    requests.post(DISCORD_WEBHOOK, json={"content": message})
+    print("通知:", message)
 
+def main():
+    notified = load_cache()
+    events = fetch_events()
+    for summary, dt in events:
+        key = f"{summary}_{dt.isoformat()}"
+        if key not in notified:
+            notify(summary, dt)
+            notified.add(key)
+    save_cache(notified)
 
-def check_and_notify():
-    events = get_upcoming_events()
-    for summary, dt, delta_minutes in events:
-        if 1430 <= delta_minutes <= 1450:  # 約24時間前
-            send_discord_notify(
-                f"⏰ **明日締切の課題があります！**\n📄 {summary}\n🕒 期限: {dt.strftime('%Y-%m-%d %H:%M')}"
-            )
-        elif 50 <= delta_minutes <= 70:  # 約1時間前
-            send_discord_notify(
-                f"⚠️ **あと1時間で締切の課題！**\n📄 {summary}\n🕒 期限: {dt.strftime('%Y-%m-%d %H:%M')}"
-            )
-        elif 0 <= delta_minutes <= 5:
-            send_discord_notify(
-                f"🚨 **まもなく締切です！**\n📄 {summary}\n🕒 期限: {dt.strftime('%Y-%m-%d %H:%M')}"
-            )
+if __name__ == "__main__":
+    main()
 
-
-def check():
-    events = get_upcoming_events()
-    send_discord_notify(f"--課題一覧--")
-
-    for summary, dt, delta_minutes in events:
-        if 0 <= delta_minutes <= 1440:  # 約24時間前
-            send_discord_notify(
-                f"⏰ **締切が近い課題があります！**\n📄 {summary}\n🕒 期限: {dt.strftime('%Y-%m-%d %H:%M')}"
-            )
-
-
-check()
-check_and_notify()
