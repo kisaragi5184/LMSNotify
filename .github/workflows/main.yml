@@ -1,0 +1,20 @@
+name: Notify deadlines
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # 10分ごと
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests icalendar pytz
+      - name: Run notifier
+        env:
+          ICS_URL: ${{ secrets.ICS_URL }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python notifier.py
