@@ -1,22 +1,66 @@
-name: Notify deadlines
+name: Notify Upcoming Deadlines
+
 on:
   schedule:
-    - cron: '*/10 * * * *'  # 10分ごと
+    - cron: '*/10 * * * *'
   workflow_dispatch:
+
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      ICS_URL: ${{ secrets.ICS_URL }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install requests icalendar pytz
-      - name: Run notifier
-        env:
-          ICS_URL: ${{ secrets.ICS_URL }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python LMS_assignment_notify.py
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests icalendar pytz
+
+      - name: Restore or create cache for notified events
+        uses: actions/cache@v4
+        id: cache-notified
+        with:
+          path: notified.json
+          key: notified-events-v1 # 固定キー
+          # restore-keys はこの場合あまり意味がないかもしれない
+
+      - name: Run script
+        run: python  LMS_assignment_notify.py # スクリプト名を指定
+
+      # 重要: `actions/cache` はキーが既に存在するとキャッシュを更新しません。
+      # このため、`notified.json` の更新をキャッシュに反映させるには、
+      # 毎回キーを変えるか、キャッシュを手動でクリアする必要があります。
+      # または、キャッシュの保存を別の方法で行う（例：artifact）。
+      #
+      # もし、キャッシュがヒットしなかった場合（初回実行など）にのみ
+      # スクリプト実行後の `notified.json` が保存される、という挙動になります。
+      #
+      # 頻繁に実行されるジョブで、かつ `notified.json` が常に最新である必要がある場合、
+      # `actions/cache` はこの用途には限定的かもしれません。
+      #
+      # 代替案として、ジョブの最後に `notified.json` をアーティファクトとしてアップロードし、
+      # 次のジョブの開始時にダウンロードする方法があります。
+      #
+      # - name: Upload notified.json as artifact
+      #   if: always() # 常に実行（成功・失敗に関わらず）
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: notified-data
+      #     path: notified.json
+      #
+      # この場合、キャッシュステップの代わりに、ワークフローの最初にアーティファクトをダウンロードするステップを追加します。
+      # - name: Download notified.json artifact
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: notified-data
+      #     path: . # カレントディレクトリに展開
+      #   continue-on-error: true # 初回などアーティファクトがない場合エラーにしない
