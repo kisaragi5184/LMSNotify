@@ -17,4 +17,5 @@ jobs:
         env:
           ICS_URL: ${{ secrets.ICS_URL }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python notifier.py
+        run: python LMS_assignment_notify.py
+
