@@ -2,15 +2,16 @@ name: Notify Upcoming Deadlines
 
 on:
   schedule:
-    - cron: '*/60 * * * *'
-  workflow_dispatch:
+    # 毎日特定の時刻に実行 (例: JST午前9時 = UTC午前0時)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 手動実行も可能にする
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     env:
-      ICS_URL: ${{ secrets.ICS_URL }}
-      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      ICS_URL: ${{ secrets.ICS_URL }} # GitHub Secretsに設定したICSのURL
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} # GitHub Secretsに設定したDiscordのWebhook URL
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,49 +19,37 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.x' # 適切なPythonバージョンを指定
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests icalendar pytz
 
-      - name: Restore or create cache for notified events
+      - name: Restore cache for notified events
         uses: actions/cache@v4
-        id: cache-notified
+        id: cache-notified-events # ステップにIDを付与して、後で出力（cache-hit）を参照できるようにする
         with:
-          path: notified.json
-          key: notified-events-v1 # 固定キー
-          # restore-keys はこの場合あまり意味がないかもしれない
+          path: notified.json # キャッシュするファイルのパス
+          key: ${{ runner.os }}-notified-events # キャッシュキー。OSが変わることは少ないが、念のため含める
 
-      - name: Run script
-        run: python  LMS_assignment_notify.py # スクリプト名を指定
+      - name: Run script to check and notify deadlines
+        run: python LMS_assignment_notify.py # ここにPythonスクリプトのファイル名を入力
 
-      # 重要: `actions/cache` はキーが既に存在するとキャッシュを更新しません。
-      # このため、`notified.json` の更新をキャッシュに反映させるには、
-      # 毎回キーを変えるか、キャッシュを手動でクリアする必要があります。
-      # または、キャッシュの保存を別の方法で行う（例：artifact）。
+      # notified.json が更新された場合、または新規作成された場合にキャッシュを保存する
+      # actions/cache はジョブの最後に自動で保存処理を行うが、
+      # より明示的に制御したい場合や、特定の条件で保存したい場合は、
+      # post ジョブステップで実行する (この例ではデフォルト_の動作に任せる)
       #
-      # もし、キャッシュがヒットしなかった場合（初回実行など）にのみ
-      # スクリプト実行後の `notified.json` が保存される、という挙動になります。
+      # もし、スクリプトの実行結果に関わらず常にキャッシュを保存したい場合は、
+      # 以下のステップは不要で、上記の 'Restore cache for notified events' ステップが
+      # ジョブ完了時に自動的に `notified.json` を指定されたキーで保存します。
       #
-      # 頻繁に実行されるジョブで、かつ `notified.json` が常に最新である必要がある場合、
-      # `actions/cache` はこの用途には限定的かもしれません。
+      # ただし、`actions/cache`はキーに完全一致するキャッシュが存在する場合、
+      # キャッシュの保存ステップをスキップします。
+      # 確実に毎回上書き保存したい場合は、キーを工夫するか、
+      # キャッシュアーティファクトをアップロード/ダウンロードする別の方法を検討する必要があります。
       #
-      # 代替案として、ジョブの最後に `notified.json` をアーティファクトとしてアップロードし、
-      # 次のジョブの開始時にダウンロードする方法があります。
-      #
-      # - name: Upload notified.json as artifact
-      #   if: always() # 常に実行（成功・失敗に関わらず）
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: notified-data
-      #     path: notified.json
-      #
-      # この場合、キャッシュステップの代わりに、ワークフローの最初にアーティファクトをダウンロードするステップを追加します。
-      # - name: Download notified.json artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: notified-data
-      #     path: . # カレントディレクトリに展開
-      #   continue-on-error: true # 初回などアーティファクトがない場合エラーにしない
+      # このユースケースでは、`notified.json` の内容は蓄積されていくものなので、
+      # `actions/cache` のデフォルトの挙動（キーが同じなら上書き保存）で問題ないはずです。
+      # `key` が完全一致すれば、ジョブ終了時にそのキーで `path` の内容が保存されます。
