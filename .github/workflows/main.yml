@@ -2,6 +2,7 @@ name: Notify deadlines
 on:
   schedule:
     - cron: '*/10 * * * *'  # 10分ごと
+  workflow_dispatch:
 jobs:
   notify:
     runs-on: ubuntu-latest
